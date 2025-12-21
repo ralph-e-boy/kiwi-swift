@@ -7,6 +7,7 @@ py/src/version.h
 
 benchmarks/run_bench
 build/
+.build/
 dist/
 kiwisolver.egg-info/
 .eggs
@@ -17,3 +18,9 @@ kiwisolver.egg-info/
 
 # clangd cache
 .cache/
+
+# claude 
+CLAUDE.md
+
+# swift build folder
+.swiftpm/

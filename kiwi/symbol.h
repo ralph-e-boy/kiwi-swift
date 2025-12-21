@@ -6,7 +6,7 @@
 | The full license is in the file LICENSE, distributed with this software.
 |----------------------------------------------------------------------------*/
 #pragma once
-
+#include "platform.h"
 
 namespace kiwi
 {
@@ -36,11 +36,13 @@ public:
 
 	~Symbol() = default;
 
+	KIWI_ALWAYS_INLINE
 	Id id() const
 	{
 		return m_id;
 	}
 
+	KIWI_ALWAYS_INLINE
 	Type type() const
 	{
 		return m_type;

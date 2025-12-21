@@ -9,11 +9,13 @@
 #include <algorithm>
 #include <limits>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 #include "constraint.h"
 #include "errors.h"
 #include "expression.h"
 #include "maptype.h"
+#include "platform.h"
 #include "row.h"
 #include "symbol.h"
 #include "term.h"
@@ -44,6 +46,22 @@ class SolverImpl
 		double constant;
 	};
 
+	struct SymbolHash
+	{
+		std::size_t operator()( const Symbol& s ) const noexcept
+		{
+			return std::hash<unsigned long long>{}( s.id() );
+		}
+	};
+
+	struct SymbolEqual
+	{
+		bool operator()( const Symbol& a, const Symbol& b ) const noexcept
+		{
+			return a == b;
+		}
+	};
+
 	using VarMap = MapType<Variable, Symbol>;
 
 	using RowMap = MapType<Symbol, Row*>;
@@ -52,12 +70,71 @@ class SolverImpl
 
 	using EditMap = MapType<Variable, EditInfo>;
 
+	// Column index: maps each non-basic symbol to the basic symbols whose
+	// rows contain it. This allows substitute() to visit only O(k) rows
+	// instead of all O(D) rows. May contain stale entries (rows where the
+	// symbol was removed via coefficient cancellation); these cause a
+	// harmless no-op in Row::substitute.
+	using ColumnMap = std::unordered_map<Symbol, std::vector<Symbol>, SymbolHash, SymbolEqual>;
+
 	struct DualOptimizeGuard
 	{
 		DualOptimizeGuard( SolverImpl& impl ) : m_impl( impl ) {}
 		~DualOptimizeGuard() { m_impl.dualOptimize(); }
 		SolverImpl& m_impl;
 	};
+
+	// Free-list pool for Row objects. Avoids heap alloc/dealloc per
+	// constraint and preserves internal vector capacity across reuses.
+	class RowPool
+	{
+	public:
+		~RowPool()
+		{
+			for( Row* r : m_free )
+				delete r;
+		}
+
+		Row* acquire( double constant = 0.0 )
+		{
+			if( !m_free.empty() )
+			{
+				Row* r = m_free.back();
+				m_free.pop_back();
+				r->reset( constant );
+				return r;
+			}
+			return new Row( constant );
+		}
+
+		Row* acquireCopy( const Row& other )
+		{
+			if( !m_free.empty() )
+			{
+				Row* r = m_free.back();
+				m_free.pop_back();
+				*r = other;
+				return r;
+			}
+			return new Row( other );
+		}
+
+		void release( Row* r )
+		{
+			m_free.push_back( r );
+		}
+
+	private:
+		std::vector<Row*> m_free;
+	};
+
+	struct PoolDeleter
+	{
+		RowPool* pool;
+		void operator()( Row* r ) const { pool->release( r ); }
+	};
+
+	using PoolRowPtr = std::unique_ptr<Row, PoolDeleter>;
 
 public:
 
@@ -82,7 +159,7 @@ public:
 	*/
 	void addConstraint( const Constraint& constraint )
 	{
-		if( m_cns.find( constraint ) != m_cns.end() )
+		if( KIWI_UNLIKELY( m_cns.find( constraint ) != m_cns.end() ) )
 			throw DuplicateConstraint( constraint );
 
 		// Creating a row causes symbols to be reserved for the variables
@@ -92,7 +169,7 @@ public:
 		// constraints and since exceptional conditions are uncommon,
 		// i'm not too worried about aggressive cleanup of the var map.
 		Tag tag;
-		std::unique_ptr<Row> rowptr( createRow( constraint, tag ) );
+		PoolRowPtr rowptr( createRow( constraint, tag ) );
 		Symbol subject( chooseSubject( *rowptr, tag ) );
 
 		// If chooseSubject could not find a valid entering symbol, one
@@ -143,7 +220,7 @@ public:
 	void removeConstraint( const Constraint& constraint )
 	{
 		auto cn_it = m_cns.find( constraint );
-		if( cn_it == m_cns.end() )
+		if( KIWI_UNLIKELY( cn_it == m_cns.end() ) )
 			throw UnknownConstraint( constraint );
 
 		Tag tag( cn_it->second );
@@ -159,16 +236,17 @@ public:
 		auto row_it = m_rows.find( tag.marker );
 		if( row_it != m_rows.end() )
 		{
-			std::unique_ptr<Row> rowptr( row_it->second );
+			m_row_pool.release( row_it->second );
 			m_rows.erase( row_it );
+			rebuildColumns();
 		}
 		else
 		{
 			row_it = getMarkerLeavingRow( tag.marker );
-			if( row_it == m_rows.end() )
+			if( KIWI_UNLIKELY( row_it == m_rows.end() ) )
 				throw InternalSolverError( "failed to find leaving row" );
 			Symbol leaving( row_it->first );
-			std::unique_ptr<Row> rowptr( row_it->second );
+			PoolRowPtr rowptr( row_it->second, PoolDeleter{ &m_row_pool } );
 			m_rows.erase( row_it );
 			rowptr->solveFor( leaving, tag.marker );
 			substitute( tag.marker, *rowptr );
@@ -204,7 +282,7 @@ public:
 	*/
 	void addEditVariable( const Variable& variable, double strength )
 	{
-		if( m_edits.find( variable ) != m_edits.end() )
+		if( KIWI_UNLIKELY( m_edits.find( variable ) != m_edits.end() ) )
 			throw DuplicateEditVariable( variable );
 		strength = strength::clip( strength );
 		if( strength == strength::required )
@@ -229,7 +307,7 @@ public:
 	void removeEditVariable( const Variable& variable )
 	{
 		auto it = m_edits.find( variable );
-		if( it == m_edits.end() )
+		if( KIWI_UNLIKELY( it == m_edits.end() ) )
 			throw UnknownEditVariable( variable );
 		removeConstraint( it->second.constraint );
 		m_edits.erase( it );
@@ -257,7 +335,7 @@ public:
 	void suggestValue( const Variable& variable, double value )
 	{
 		auto it = m_edits.find( variable );
-		if( it == m_edits.end() )
+		if( KIWI_UNLIKELY( it == m_edits.end() ) )
 			throw UnknownEditVariable( variable );
 
 		DualOptimizeGuard guard( *this );
@@ -283,14 +361,22 @@ public:
 			return;
 		}
 
-		// Otherwise update each row where the error variables exist.
-		for (const auto & rowPair : m_rows)
+		// Update only the rows where the marker variable exists,
+		// using the column index for O(k) lookup instead of O(D) scan.
+		auto col_it = m_columns.find( info.tag.marker );
+		if( col_it != m_columns.end() )
 		{
-			double coeff = rowPair.second->coefficientFor( info.tag.marker );
-			if( coeff != 0.0 &&
-				rowPair.second->add( delta * coeff ) < 0.0 &&
-				rowPair.first.type() != Symbol::External )
-				m_infeasible_rows.push_back( rowPair.first );
+			for( const Symbol& basic : col_it->second )
+			{
+				auto row_it = m_rows.find( basic );
+				if( row_it == m_rows.end() )
+					continue;
+				double coeff = row_it->second->coefficientFor( info.tag.marker );
+				if( coeff != 0.0 &&
+					row_it->second->add( delta * coeff ) < 0.0 &&
+					basic.type() != Symbol::External )
+					m_infeasible_rows.push_back( basic );
+			}
 		}
 	}
 
@@ -327,6 +413,7 @@ public:
 		m_cns.clear();
 		m_vars.clear();
 		m_edits.clear();
+		m_columns.clear();
 		m_infeasible_rows.clear();
 		m_objective.reset( new Row() );
 		m_artificial.reset();
@@ -339,16 +426,12 @@ public:
 
 private:
 
-	struct RowDeleter
-	{
-		template<typename T>
-		void operator()( T& pair ) { delete pair.second; }
-	};
-
 	void clearRows()
 	{
-		std::for_each( m_rows.begin(), m_rows.end(), RowDeleter() );
+		for( auto& pair : m_rows )
+			m_row_pool.release( pair.second );
 		m_rows.clear();
+		m_columns.clear();
 	}
 
 	/* Get the symbol for the given variable.
@@ -383,10 +466,10 @@ private:
 	for tracking the movement of the constraint in the tableau.
 
 	*/
-	std::unique_ptr<Row> createRow( const Constraint& constraint, Tag& tag )
+	PoolRowPtr createRow( const Constraint& constraint, Tag& tag )
 	{
 		const Expression& expr( constraint.expression() );
-		std::unique_ptr<Row> row( new Row( expr.constant() ) );
+		PoolRowPtr row( m_row_pool.acquire( expr.constant() ), PoolDeleter{ &m_row_pool } );
 
 		// Substitute the current basic variables into the row.
 		for (const auto &term : expr.terms())
@@ -494,7 +577,8 @@ private:
  	{
 		// Create and add the artificial variable to the tableau
 		Symbol art( Symbol::Slack, m_id_tick++ );
-		m_rows[ art ] = new Row( row );
+		m_rows[ art ] = m_row_pool.acquireCopy( row );
+		rebuildColumns();
 		m_artificial.reset( new Row( row ) );
 
 		// Optimize the artificial objective. This is successful
@@ -508,10 +592,13 @@ private:
 		auto it = m_rows.find( art );
 		if( it != m_rows.end() )
 		{
-			std::unique_ptr<Row> rowptr( it->second );
+			PoolRowPtr rowptr( it->second, PoolDeleter{ &m_row_pool } );
 			m_rows.erase( it );
 			if( rowptr->cells().empty() )
+			{
+				rebuildColumns();
 				return success;
+			}
 			Symbol entering( anyPivotableSymbol( *rowptr ) );
 			if( entering.type() == Symbol::Invalid )
 				return false;  // unsatisfiable (will this ever happen?)
@@ -543,6 +630,8 @@ private:
 				rowPair.second->constant() < 0.0 )
 				m_infeasible_rows.push_back( rowPair.first );
 		}
+		// Rebuild column index after bulk substitution to keep it in sync.
+		rebuildColumns();
 		m_objective->substitute( symbol, row );
 		if( m_artificial.get() )
 			m_artificial->substitute( symbol, row );
@@ -567,7 +656,7 @@ private:
 			if( entering.type() == Symbol::Invalid )
 				return;
 			auto it = getLeavingRow( entering );
-			if( it == m_rows.end() )
+			if( KIWI_UNLIKELY( it == m_rows.end() ) )
 				throw InternalSolverError( "The objective is unbounded." );
 			// pivot the entering symbol into the basis
 			Symbol leaving( it->first );
@@ -596,7 +685,6 @@ private:
 	{
 		while( !m_infeasible_rows.empty() )
 		{
-
 			Symbol leaving( m_infeasible_rows.back() );
 			m_infeasible_rows.pop_back();
 			auto it = m_rows.find( leaving );
@@ -604,7 +692,7 @@ private:
 				it->second->constant() < 0.0 )
 			{
 				Symbol entering( getDualEnteringSymbol( *it->second ) );
-				if( entering.type() == Symbol::Invalid )
+				if( KIWI_UNLIKELY( entering.type() == Symbol::Invalid ) )
 					throw InternalSolverError( "Dual optimize failed." );
 				// pivot the entering symbol into the basis
 				Row* row = it->second;
@@ -810,13 +898,29 @@ private:
 		return true;
 	}
 
+	// Rebuild the column index from scratch by scanning all rows.
+	void rebuildColumns()
+	{
+		m_columns.clear();
+		for( const auto& rowPair : m_rows )
+		{
+			const Symbol& basic = rowPair.first;
+			const std::size_t n = rowPair.second->cellCount();
+			const Symbol* keys = rowPair.second->keyData();
+			for( std::size_t i = 0; i < n; ++i )
+				m_columns[ keys[i] ].push_back( basic );
+		}
+	}
+
 	CnMap m_cns;
 	RowMap m_rows;
 	VarMap m_vars;
 	EditMap m_edits;
+	ColumnMap m_columns;
 	std::vector<Symbol> m_infeasible_rows;
 	std::unique_ptr<Row> m_objective;
 	std::unique_ptr<Row> m_artificial;
+	mutable RowPool m_row_pool;
 	Symbol::Id m_id_tick;
 };
 

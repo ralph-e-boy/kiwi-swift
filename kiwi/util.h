@@ -6,6 +6,7 @@
 | The full license is in the file LICENSE, distributed with this software.
 |----------------------------------------------------------------------------*/
 #pragma once
+#include "platform.h"
 
 namespace kiwi
 {
@@ -13,10 +14,10 @@ namespace kiwi
 namespace impl
 {
 
+KIWI_ALWAYS_INLINE
 inline bool nearZero(double value)
 {
-    const double eps = 1.0e-8;
-    return value < 0.0 ? -value < eps : value < eps;
+    return __builtin_fabs(value) < 1.0e-8;
 }
 
 } // namespace impl
