@@ -53,11 +53,19 @@ target_compile_features(kiwi INTERFACE cxx_std_11)
 
 target_compile_options(kiwi INTERFACE
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:
-        -Wall 
+        -Wall
         -Wextra
         -Wpedantic
     >
 )
+
+# Apple Accelerate framework for SIMD-optimized operations
+if(APPLE)
+    find_library(ACCELERATE_FRAMEWORK Accelerate)
+    if(ACCELERATE_FRAMEWORK)
+        target_link_libraries(kiwi INTERFACE ${ACCELERATE_FRAMEWORK})
+    endif()
+endif()
 
 # Benchmarks
 if(KIWI_BUILD_BENCHMARKS)
