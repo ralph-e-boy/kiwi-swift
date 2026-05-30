@@ -1,4 +1,4 @@
-# KiwiSolver
+# KiwiSolver Swift
 
 A high-performance constraint solver for Swift, based on the [Kiwi](https://github.com/nucleic/kiwi) C++ implementation of the Cassowary algorithm. Solves linear constraint systems 40x faster than the original Cassowary with significantly lower memory usage.
 
