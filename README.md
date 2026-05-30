@@ -2,7 +2,9 @@
 
 A high-performance constraint solver for Swift, based on the [Kiwi](https://github.com/nucleic/kiwi) C++ implementation of the Cassowary algorithm. Solves linear constraint systems 40x faster than the original Cassowary with significantly lower memory usage.
 
+### AutoLayout for Metal 
 **Use case:** Constraint-based layout that works anywhere — Metal graphics, custom rendering, game engines, or any graphics context where you need to compute positions and sizes from constraints.
+
 
 ## Why KiwiSolver?
 
