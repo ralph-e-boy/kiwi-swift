@@ -13,6 +13,9 @@ let package = Package(
     products: [
         .library(name: "KiwiSolver", targets: ["KiwiSolver"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/ralph-e-boy/swift-llmref", from: "0.0.1"),
+    ],
     targets: [
         .target(
             name: "CxxKiwi",
