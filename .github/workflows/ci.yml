@@ -135,15 +135,3 @@ jobs:
         run: |
           pip install pytest
           python -X dev -m pytest py -W error
-      - name: Generate C++ coverage reports
-        if: (github.event_name != 'schedule' && matrix.os != 'windows-latest')
-        run: |
-          bash -c "find . -type f -name '*.gcno' -exec gcov -pb --all-blocks {} +" || true
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
-        if: (github.event_name != 'schedule' && matrix.os != 'windows-latest')
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          flags: unittests
-          name: codecov-umbrella
-          fail_ci_if_error: true
