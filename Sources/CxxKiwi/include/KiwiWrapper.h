@@ -139,16 +139,16 @@ struct ConstraintBuilder {
 
     // coef1*var1 + coef2*var2 >= constant
     static kiwi::Constraint linearGreaterOrEqual(const kiwi::Variable& var1, double coef1,
-                                                 const kiwi::Variable& var2, double coef2,
-                                                 double constant, double strength = kiwi::strength::required) {
+                                                  const kiwi::Variable& var2, double coef2,
+                                                  double constant, double strength = kiwi::strength::required) {
         std::vector<kiwi::Term> terms = {kiwi::Term(var1, coef1), kiwi::Term(var2, coef2)};
         return kiwi::Constraint(kiwi::Expression(std::move(terms), -constant), kiwi::OP_GE, strength);
     }
 
     // coef1*var1 + coef2*var2 <= constant
     static kiwi::Constraint linearLessOrEqual(const kiwi::Variable& var1, double coef1,
-                                              const kiwi::Variable& var2, double coef2,
-                                              double constant, double strength = kiwi::strength::required) {
+                                               const kiwi::Variable& var2, double coef2,
+                                               double constant, double strength = kiwi::strength::required) {
         std::vector<kiwi::Term> terms = {kiwi::Term(var1, coef1), kiwi::Term(var2, coef2)};
         return kiwi::Constraint(kiwi::Expression(std::move(terms), -constant), kiwi::OP_LE, strength);
     }

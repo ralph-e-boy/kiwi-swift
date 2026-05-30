@@ -14,7 +14,7 @@ let package = Package(
         .library(name: "KiwiSolver", targets: ["KiwiSolver"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-docc-plugin", from: "1.0.0"),
+        .package(url: "https://github.com/ralph-e-boy/swift-llmref", from: "0.0.1"),
     ],
     targets: [
         .target(
@@ -22,7 +22,7 @@ let package = Package(
             path: "Sources/CxxKiwi",
             publicHeadersPath: "include",
             cxxSettings: [
-                .headerSearchPath("../../kiwi"),  // submodule root so kiwi/x.h resolves
+                .headerSearchPath("../.."),  // repo root for kiwi/ headers
             ]
         ),
         .target(
