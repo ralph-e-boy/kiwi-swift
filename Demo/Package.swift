@@ -13,7 +13,7 @@ let package = Package(
         .executableTarget(
             name: "KiwiDemo",
             dependencies: [
-                .product(name: "KiwiSolver", package: "kiwi"),
+                .product(name: "KiwiSolver", package: "kiwi-swift"),
             ],
             swiftSettings: [.interoperabilityMode(.Cxx)]
         ),
