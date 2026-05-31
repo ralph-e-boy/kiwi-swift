@@ -22,7 +22,7 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/nucleic/kiwi-swift.git", branch: "main"),
+    .package(url: "https://github.com/ralph-e-boy/kiwi-swift.git", branch: "main"),
 ]
 ```
 
